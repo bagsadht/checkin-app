@@ -19,15 +19,24 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Check-in Event",
   description: "Sistem pendataan peserta event",
+  applicationName: "Check-in Event",
   other: { google: "notranslate" },
+  appleWebApp: {
+    capable: true,
+    title: "Check-in",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: { telephone: false },
 };
 
+// ⚠️ WAJIB — bikin layout mobile bekerja sesuai lebar HP
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#0f172a",
+  viewportFit: "cover",
+  themeColor: "#0a0a0b",
 };
 
 export default function RootLayout({
@@ -40,7 +49,7 @@ export default function RootLayout({
       lang="id"
       translate="no"
       className={cn(
-        "dark h-full", // ← PENTING: aktifkan dark mode
+        "dark h-full",
         "antialiased",
         geistSans.variable,
         geistMono.variable,
@@ -50,12 +59,6 @@ export default function RootLayout({
     >
       <head>
         <meta name="google" content="notranslate" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta
-          name="apple-mobile-web-app-status-bar-style"
-          content="black-translucent"
-        />
-        <meta name="apple-mobile-web-app-title" content="Check-in" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
