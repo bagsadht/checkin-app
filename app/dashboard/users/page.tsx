@@ -163,7 +163,7 @@ export default function UsersPage() {
     };
 
     return (
-        <div className="p-8 text-[#fafafa]">
+        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
             <div className="mb-8 flex items-start justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Kelola Users</h1>

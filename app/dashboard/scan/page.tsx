@@ -164,7 +164,7 @@ export default function ScanPage() {
     };
 
     return (
-        <div className="p-8 text-[#fafafa]">
+        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
             {/* NOTIFICATION OVERLAY */}
             {notification && (
                 <ScanResult

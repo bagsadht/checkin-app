@@ -7,19 +7,24 @@ import Link from "next/link";
 import { loadSession, clearSession, Session } from "@/lib/session";
 import {
     LayoutDashboard, ScanLine, UserPlus, Users, FileText,
-    LogOut, QrCode, Settings, Wallet, ClipboardList,
+    LogOut, QrCode, Settings, Wallet, ClipboardList, Menu, X,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
     const pathname = usePathname();
     const [user, setUser] = useState<Session | null>(null);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
 
     useEffect(() => {
         const s = loadSession();
         if (!s) { router.replace("/login"); return; }
         setUser(s);
     }, [router]);
+
+    useEffect(() => {
+        setSidebarOpen(false);
+    }, [pathname]);
 
     const handleLogout = () => {
         clearSession();
@@ -45,9 +50,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     return (
         <div className="flex h-screen bg-[#0a0a0a] text-[#fafafa]">
-            {/* SIDEBAR */}
-            <aside className="flex w-64 flex-col border-r border-[#1c1c1c] bg-[#0f0f0f] overflow-hidden">
-                <div className="border-b border-[#1c1c1c] p-5">
+            {sidebarOpen && (
+                <div
+                    className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+
+            <aside
+                className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-[#1c1c1c] bg-[#0f0f0f] transition-transform duration-300 lg:static lg:translate-x-0 ${
+                    sidebarOpen ? "translate-x-0" : "-translate-x-full"
+                }`}
+            >
+                <div className="flex items-center justify-between border-b border-[#1c1c1c] p-5">
                     <div className="flex items-center gap-2.5">
                         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1c1c1c]">
                             <QrCode size={16} className="text-[#f59e0b]" />
@@ -57,6 +72,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                             <p className="mt-1 text-[10.5px] text-[#737373]">Gate Management</p>
                         </div>
                     </div>
+                    <button
+                        onClick={() => setSidebarOpen(false)}
+                        className="rounded-lg p-1.5 text-[#737373] hover:bg-[#1c1c1c] hover:text-[#fafafa] lg:hidden"
+                    >
+                        <X size={18} />
+                    </button>
                 </div>
 
                 <nav className="flex-1 space-y-1 overflow-y-auto p-3">
@@ -90,7 +111,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                             {user.role.replace("_", " ")}
                         </span>
                         {user.gate && (
-                            <p className="mt-1 text-[11px] text-[#737373]">📍 {user.gate}</p>
+                            <p className="mt-1 text-[11px] text-[#737373]">Gate: {user.gate}</p>
                         )}
                     </div>
                     <button
@@ -103,10 +124,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
             </aside>
 
-            {/* MAIN CONTENT */}
-            <main className="flex-1 overflow-auto">
-                {children}
-            </main>
+            <div className="flex flex-1 flex-col overflow-hidden">
+                <header className="flex items-center gap-3 border-b border-[#1c1c1c] bg-[#0f0f0f] px-4 py-3 lg:hidden">
+                    <button
+                        onClick={() => setSidebarOpen(true)}
+                        className="rounded-lg p-2 text-[#fafafa] hover:bg-[#1c1c1c]"
+                    >
+                        <Menu size={20} />
+                    </button>
+                    <div className="flex items-center gap-2">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#1c1c1c]">
+                            <QrCode size={14} className="text-[#f59e0b]" />
+                        </div>
+                        <p className="text-[13px] font-semibold">Check-in</p>
+                    </div>
+                </header>
+
+                <main className="flex-1 overflow-auto">
+                    {children}
+                </main>
+            </div>
         </div>
     );
 }

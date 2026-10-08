@@ -246,7 +246,7 @@ export default function CashPage() {
     };
 
     return (
-        <div className="p-8 text-[#fafafa]">
+        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
             <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Laporan Kas</h1>

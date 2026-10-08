@@ -111,14 +111,14 @@ export default function SettingsPage() {
 
     if (loading) {
         return (
-            <div className="p-8 text-[#fafafa]">
+            <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
                 <p className="text-sm text-[#737373]">Memuat pengaturan...</p>
             </div>
         );
     }
 
     return (
-        <div className="p-8 text-[#fafafa]">
+        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
             <div className="mb-8">
                 <h1 className="text-3xl font-bold tracking-tight">Pengaturan Pembayaran</h1>
                 <p className="mt-1 text-sm text-[#737373]">

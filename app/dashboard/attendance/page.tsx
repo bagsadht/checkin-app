@@ -188,7 +188,7 @@ export default function AttendancePage() {
     const hasFilter = search || gateFilter !== "Semua" || timeFilter !== "today";
 
     return (
-        <div className="p-8 text-[#fafafa]">
+        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
             {/* HEADER */}
             <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
                 <div>

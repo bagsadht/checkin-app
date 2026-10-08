@@ -232,7 +232,7 @@ export default function OtsPage() {
     };
 
     return (
-        <div className="p-8 text-[#fafafa]">
+        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
             <div className="mb-8 print:hidden">
                 <h1 className="text-3xl font-bold tracking-tight">Pendaftaran OTS</h1>
                 <p className="mt-1 text-sm text-[#737373]">

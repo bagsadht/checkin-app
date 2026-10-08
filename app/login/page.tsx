@@ -194,10 +194,10 @@ export default function LoginPage() {
                 </header>
 
                 {/* HERO + FORM */}
-                <div className="flex-1 pt-14 sm:pt-16">
+                <div className="flex-1 pt-8 sm:pt-14 md:pt-16">
                     <div className="ln-in" style={{ animationDelay: ".08s" }}>
                         <p className="text-[13.5px] font-medium text-[#f59e0b]">{greeting}</p>
-                        <h1 className="mt-3 text-[42px] font-bold leading-[1.03] tracking-[-0.04em] sm:text-[46px]">
+                        <h1 className="mt-3 text-[32px] font-bold leading-[1.05] tracking-[-0.04em] sm:text-[42px] md:text-[46px]">
                             Masuk ke<br /><span className="text-[#525252]">dashboard Anda.</span>
                         </h1>
                         <p className="mt-5 max-w-[320px] text-[15px] leading-[1.6] text-[#737373]">
