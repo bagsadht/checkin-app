@@ -223,3 +223,43 @@
 .animate-slide-down {
   animation: slide-down 0.3s ease-out;
 }
+
+/* === PRINT STYLES === */
+@media print {
+  /* Sembunyikan semua */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Tampilkan hanya elemen dengan class print-receipt dan isinya */
+  .print-receipt,
+  .print-receipt * {
+    visibility: visible;
+  }
+  
+  /* Posisikan kwitansi di atas kiri */
+  .print-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: white !important;
+    color: black !important;
+    padding: 20px;
+  }
+  
+  /* Force black text untuk print */
+  .print-receipt * {
+    color: black !important;
+  }
+  
+  /* Hilangkan background gelap */
+  html, body {
+    background: white !important;
+  }
+  
+  /* Sembunyikan sidebar */
+  aside, nav {
+    display: none !important;
+  }
+}

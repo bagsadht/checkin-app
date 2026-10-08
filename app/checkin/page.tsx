@@ -100,7 +100,7 @@ export default function CheckinPage() {
             window.location.href = "/login";
             return;
         }
-        setGate(s.gate);
+        setGate(s.gate ?? "");
         setPetugasName(s.name);
         setCheckins(loadCheckins());
         setReady(true);

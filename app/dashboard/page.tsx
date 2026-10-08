@@ -1,13 +1,24 @@
 // app/dashboard/page.tsx
-export default function DashboardPage() {
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { loadSession } from "@/lib/session";
+
+export default function DashboardIndex() {
+    const router = useRouter();
+
+    useEffect(() => {
+        const s = loadSession();
+        if (!s) { router.replace("/login"); return; }
+        if (s.role === "super_admin") router.replace("/dashboard/super-admin");
+        else if (s.role === "admin") router.replace("/dashboard/admin");
+        else router.replace("/login");
+    }, [router]);
+
     return (
-        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
-            <div className="text-center">
-                <h1 className="text-3xl font-bold">Dashboard</h1>
-                <p className="mt-2 text-slate-400">
-                    Dashboard real-time akan dibangun nanti.
-                </p>
-            </div>
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0a] text-sm text-[#737373]">
+            Memuat dashboard…
         </div>
     );
 }
