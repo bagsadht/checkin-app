@@ -2,7 +2,9 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { loadSession } from "@/lib/session";
 import { formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +34,7 @@ type FilterRange = "today" | "week" | "all";
 const GATES = ["Semua", "Gate 1", "Gate 2", "Gate 3", "Gate 4", "Gate 5"];
 
 export default function AttendancePage() {
+    const router = useRouter();
     const [checkins, setCheckins] = useState<Checkin[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
@@ -41,7 +44,6 @@ export default function AttendancePage() {
     const fetchCheckins = async () => {
         setLoading(true);
         try {
-            // 1. Ambil semua checkins
             const { data: checkinsData, error: cErr } = await supabase
                 .from("checkins")
                 .select("*")
@@ -59,7 +61,6 @@ export default function AttendancePage() {
                 return;
             }
 
-            // 2. Ambil peserta terkait
             const participantIds = Array.from(
                 new Set(checkinsData.map((c) => c.participant_id).filter(Boolean))
             );
@@ -86,16 +87,19 @@ export default function AttendancePage() {
     };
 
     useEffect(() => {
+        const s = loadSession();
+        if (!s || s.role !== "super_admin") {
+            router.replace("/dashboard");
+            return;
+        }
         fetchCheckins();
-    }, []);
+    }, [router]);
 
-    // Filter data
     const filtered = useMemo(() => {
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
         return checkins.filter((c) => {
-            // Time filter
             const d = new Date(c.scanned_at);
             if (timeFilter === "today" && d < startOfDay) return false;
             if (timeFilter === "week") {
@@ -103,10 +107,8 @@ export default function AttendancePage() {
                 if (d < weekAgo) return false;
             }
 
-            // Gate filter
             if (gateFilter !== "Semua" && c.gate !== gateFilter) return false;
 
-            // Search
             if (search.trim()) {
                 const q = search.toLowerCase();
                 const name = c.participants?.name?.toLowerCase() ?? "";
@@ -124,7 +126,6 @@ export default function AttendancePage() {
         });
     }, [checkins, search, gateFilter, timeFilter]);
 
-    // Stats per gate
     const statsPerGate = useMemo(() => {
         const stats: Record<string, number> = {};
         GATES.slice(1).forEach((g) => (stats[g] = 0));
@@ -134,7 +135,6 @@ export default function AttendancePage() {
         return stats;
     }, [filtered]);
 
-    // Export CSV
     const handleExportCSV = () => {
         if (filtered.length === 0) {
             alert("Belum ada data untuk diexport");
@@ -256,7 +256,6 @@ export default function AttendancePage() {
             <Card className="mb-6 border-[#1c1c1c] bg-[#0f0f0f]">
                 <CardContent className="p-4">
                     <div className="flex flex-wrap items-center gap-3">
-                        {/* Search */}
                         <div className="relative min-w-[240px] flex-1">
                             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#525252]" />
                             <Input
@@ -267,7 +266,6 @@ export default function AttendancePage() {
                             />
                         </div>
 
-                        {/* Gate filter */}
                         <div className="flex items-center gap-2">
                             <Filter size={14} className="text-[#737373]" />
                             <select
@@ -281,7 +279,6 @@ export default function AttendancePage() {
                             </select>
                         </div>
 
-                        {/* Time filter */}
                         <div className="flex gap-1">
                             {(["today", "week", "all"] as FilterRange[]).map((t) => (
                                 <button
@@ -300,7 +297,6 @@ export default function AttendancePage() {
                             ))}
                         </div>
 
-                        {/* Clear */}
                         {hasFilter && (
                             <button
                                 onClick={handleClearFilters}

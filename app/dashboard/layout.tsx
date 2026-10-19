@@ -34,19 +34,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!user) return <div className="min-h-screen bg-[#0a0a0a]" />;
 
     const isSuperAdmin = user.role === "super_admin";
-
     const menuItems = [
-        { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-        { name: "Scan Tiket", href: "/dashboard/scan", icon: ScanLine },
-        { name: "Pendaftaran OTS", href: "/dashboard/ots", icon: UserPlus },
+    { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
+    { name: "Scan Tiket", href: "/dashboard/scan", icon: ScanLine },
+    { name: "Pendaftaran OTS", href: "/dashboard/ots", icon: UserPlus },
+    ...(isSuperAdmin ? [
         { name: "List Kehadiran", href: "/dashboard/attendance", icon: ClipboardList },
-        ...(isSuperAdmin ? [
-            { name: "Laporan Kas", href: "/dashboard/cash", icon: Wallet },
-            { name: "Kelola Users", href: "/dashboard/users", icon: Users },
-            { name: "Kelola Konten", href: "/dashboard/content", icon: FileText },
-            { name: "Pengaturan Pembayaran", href: "/dashboard/settings", icon: Settings },
-        ] : []),
-    ];
+        { name: "Laporan Kas", href: "/dashboard/cash", icon: Wallet },
+        { name: "Kelola Users", href: "/dashboard/users", icon: Users },
+        { name: "Kelola Konten", href: "/dashboard/content", icon: FileText },
+        { name: "Pengaturan Pembayaran", href: "/dashboard/settings", icon: Settings },
+    ] : []),
+];
 
     return (
         <div className="flex h-screen bg-[#0a0a0a] text-[#fafafa]">
