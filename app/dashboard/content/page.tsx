@@ -2,7 +2,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { parseNumberInput } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,24 +48,23 @@ export default function ContentPage() {
         setLoading(true);
         setError(null);
         
-        const { data: contentData, error: contentErr } = await supabase
-            .from("site_content")
-            .select("*")
-            .eq("id", 1)
-            .maybeSingle();
+        try {
+            const contentSnap = await getDoc(doc(db, "site_content", "default"));
+            if (contentSnap.exists()) {
+                setForm(contentSnap.data() as SiteContent);
+            }
 
-        if (contentErr) setError(contentErr.message);
-        else if (contentData) setForm(contentData);
-
-        const { data: priceData, error: priceErr } = await supabase
-            .from("ticket_prices")
-            .select("*")
-            .order("price", { ascending: true });
-
-        if (priceErr) setError(priceErr.message);
-        else setPrices(priceData ?? []);
-
-        setLoading(false);
+            const priceSnap = await getDocs(collection(db, "ticket_prices"));
+            const priceData = priceSnap.docs.map(d => ({ 
+                category: d.data().category, 
+                price: d.data().price 
+            }));
+            setPrices(priceData.sort((a, b) => a.price - b.price));
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -82,34 +82,29 @@ export default function ContentPage() {
         }
 
         setSaving(true);
-
-        const { error: contentErr } = await supabase
-            .from("site_content")
-            .update({
+        try {
+            await setDoc(doc(db, "site_content", "default"), {
                 panitia_title: form.panitia_title.trim(),
                 panitia_description: form.panitia_description.trim(),
                 admin_title: form.admin_title.trim(),
                 admin_description: form.admin_description.trim(),
                 updated_at: new Date().toISOString(),
-            })
-            .eq("id", 1);
+            }, { merge: true });
 
-        if (contentErr) {
-            setError(contentErr.message);
+            for (const p of prices) {
+                await setDoc(doc(db, "ticket_prices", p.category.toLowerCase()), {
+                    category: p.category,
+                    price: p.price,
+                    updated_at: new Date().toISOString()
+                }, { merge: true });
+            }
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 3000);
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
             setSaving(false);
-            return;
         }
-
-        for (const p of prices) {
-            await supabase
-                .from("ticket_prices")
-                .update({ price: p.price, updated_at: new Date().toISOString() })
-                .eq("category", p.category);
-        }
-
-        setSuccess(true);
-        setSaving(false);
-        setTimeout(() => setSuccess(false), 3000);
     };
 
     const handleUpdatePrice = (category: string, value: string) => {
@@ -148,7 +143,6 @@ export default function ContentPage() {
 
             <form onSubmit={handleSave} className="space-y-6 pb-20 sm:pb-0">
                 
-                {/* HARGA TIKET */}
                 <Card className="border-[#f59e0b]/30 bg-[#0f0f0f]">
                     <CardHeader className="p-4 sm:p-6 sm:pb-4">
                         <CardTitle className="flex items-center gap-2 text-[14px] sm:text-[15px]">
@@ -179,7 +173,6 @@ export default function ContentPage() {
                     </CardContent>
                 </Card>
 
-                {/* HALAMAN PANITIA */}
                 <Card className="border-[#1c1c1c] bg-[#0f0f0f]">
                     <CardHeader className="p-4 sm:p-6 sm:pb-4">
                         <CardTitle className="flex items-center gap-2 text-[14px] sm:text-[15px]">
@@ -210,7 +203,6 @@ export default function ContentPage() {
                     </CardContent>
                 </Card>
 
-                {/* DASHBOARD ADMIN */}
                 <Card className="border-[#1c1c1c] bg-[#0f0f0f]">
                     <CardHeader className="p-4 sm:p-6 sm:pb-4">
                         <CardTitle className="flex items-center gap-2 text-[14px] sm:text-[15px]">
@@ -255,7 +247,6 @@ export default function ContentPage() {
                     </div>
                 )}
 
-                {/* TOMBOL SIMPAN (Sticky di HP) */}
                 <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-[#1c1c1c] bg-[#0a0a0a]/90 p-3 backdrop-blur-md sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
                     <Button
                         type="submit"

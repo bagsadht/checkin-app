@@ -2,14 +2,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     UserPlus, Pencil, Trash2, X, Save, ShieldCheck, Shield,
-    Mail, Lock, MapPin, User as UserIcon, AlertTriangle,
+    Mail, MapPin, AlertTriangle,
 } from "lucide-react";
 
 type UserRole = "super_admin" | "admin" | "participant";
@@ -17,7 +18,6 @@ type UserRole = "super_admin" | "admin" | "participant";
 type DbUser = {
     id: string;
     email: string;
-    password: string;
     name: string;
     role: UserRole;
     assigned_gate: string | null;
@@ -33,7 +33,6 @@ export default function UsersPage() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Form state
     const [form, setForm] = useState({
         email: "",
         password: "",
@@ -44,17 +43,15 @@ export default function UsersPage() {
 
     const fetchUsers = async () => {
         setLoading(true);
-        const { data, error: err } = await supabase
-            .from("users")
-            .select("*")
-            .order("role", { ascending: true });
-
-        if (err) {
+        try {
+            const snap = await getDocs(query(collection(db, "users"), orderBy("role", "asc")));
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as DbUser[];
+            setUsers(data);
+        } catch (err: any) {
             setError(err.message);
-        } else {
-            setUsers(data ?? []);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     useEffect(() => {
@@ -77,7 +74,7 @@ export default function UsersPage() {
     const handleEdit = (user: DbUser) => {
         setForm({
             email: user.email,
-            password: user.password,
+            password: "", // Biarkan kosong jika tidak ingin ganti password
             name: user.name,
             role: user.role,
             assigned_gate: user.assigned_gate ?? GATES[0],
@@ -91,13 +88,12 @@ export default function UsersPage() {
         e.preventDefault();
         setError(null);
 
-        // Validasi
         if (!form.email.trim() || !form.email.includes("@")) {
             setError("Email tidak valid");
             return;
         }
-        if (!form.password || form.password.length < 4) {
-            setError("Password minimal 4 karakter");
+        if (!editing && (!form.password || form.password.length < 6)) {
+            setError("Password minimal 6 karakter");
             return;
         }
         if (!form.name.trim()) {
@@ -106,7 +102,6 @@ export default function UsersPage() {
         }
 
         setSaving(true);
-
         const payload = {
             email: form.email.trim().toLowerCase(),
             password: form.password,
@@ -115,32 +110,26 @@ export default function UsersPage() {
             assigned_gate: form.role === "admin" ? form.assigned_gate : null,
         };
 
-        if (editing) {
-            // Update
-            const { error: err } = await supabase
-                .from("users")
-                .update(payload)
-                .eq("id", editing.id);
+        try {
+            const method = editing ? "PUT" : "POST";
+            const body = editing ? { uid: editing.id, ...payload } : payload;
 
-            if (err) {
-                setError(err.message);
-                setSaving(false);
-                return;
-            }
-        } else {
-            // Insert
-            const { error: err } = await supabase.from("users").insert(payload);
+            const res = await fetch("/api/users", {
+                method,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
 
-            if (err) {
-                setError(err.message);
-                setSaving(false);
-                return;
-            }
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Gagal menyimpan user");
+
+            await fetchUsers();
+            resetForm();
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setSaving(false);
         }
-
-        await fetchUsers();
-        setSaving(false);
-        resetForm();
     };
 
     const handleDelete = async (user: DbUser) => {
@@ -150,16 +139,13 @@ export default function UsersPage() {
         }
         if (!confirm(`Hapus user "${user.name}" (${user.email})?`)) return;
 
-        const { error: err } = await supabase
-            .from("users")
-            .delete()
-            .eq("id", user.id);
-
-        if (err) {
-            alert("Gagal menghapus: " + err.message);
-            return;
+        try {
+            const res = await fetch(`/api/users?uid=${user.id}`, { method: "DELETE" });
+            if (!res.ok) throw new Error("Gagal menghapus user");
+            fetchUsers();
+        } catch (err: any) {
+            alert(err.message);
         }
-        fetchUsers();
     };
 
     return (
@@ -182,7 +168,6 @@ export default function UsersPage() {
                 )}
             </div>
 
-            {/* FORM */}
             {showForm && (
                 <Card className="mb-6 border-[#f59e0b]/30 bg-[#0f0f0f]">
                     <CardHeader>
@@ -221,12 +206,12 @@ export default function UsersPage() {
                                     />
                                 </div>
                                 <div>
-                                    <Label className="text-[#a3a3a3]">Password</Label>
+                                    <Label className="text-[#a3a3a3]">Password {editing && "(Kosongkan jika tidak ganti)"}</Label>
                                     <Input
                                         type="text"
                                         value={form.password}
                                         onChange={(e) => setForm({ ...form, password: e.target.value })}
-                                        placeholder="1234"
+                                        placeholder="******"
                                         disabled={saving}
                                         className="mt-2 border-[#262626] bg-[#141414] text-[#fafafa] placeholder:text-[#525252]"
                                     />
@@ -291,7 +276,6 @@ export default function UsersPage() {
                 </Card>
             )}
 
-            {/* LIST */}
             <Card className="border-[#1c1c1c] bg-[#0f0f0f]">
                 <CardHeader>
                     <CardTitle className="text-[15px]">

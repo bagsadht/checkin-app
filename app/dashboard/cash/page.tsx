@@ -2,12 +2,15 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from "react";
-import { supabase } from "@/lib/supabase";
+import { 
+    collection, query, orderBy, getDocs, doc, writeBatch, where, documentId 
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { formatRupiah, formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
     Wallet, Banknote, CreditCard, QrCode, CheckCircle2,
-    RefreshCw, Users, ChevronDown, Filter, UserCheck, AlertTriangle
+    RefreshCw, Users, ChevronDown, UserCheck, AlertTriangle
 } from "lucide-react";
 
 type Payment = {
@@ -19,16 +22,11 @@ type Payment = {
     received_by: string | null;
     receipt_no: string;
     received_at: string;
-    participants: {
-        name: string;
-        category: string;
-        assigned_gate: string;
-    } | null;
+    participants: { name: string; category: string; assigned_gate: string; } | null;
 };
 
 type FilterRange = "today" | "week" | "month" | "all";
 
-// Helper Animasi Angka
 function useCountUp(target: number, duration = 800) {
     const [value, setValue] = useState(0);
     const from = useRef(0);
@@ -66,48 +64,47 @@ export default function CashPage() {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<FilterRange>("today");
     const [settlingBy, setSettlingBy] = useState<string | null>(null);
-    
-    // State untuk Accordion
     const [openId, setOpenId] = useState<string | null>(null);
 
     const fetchPayments = async () => {
         setLoading(true);
-        const { data: paymentsData, error: payErr } = await supabase
-            .from("payments")
-            .select("*")
-            .order("received_at", { ascending: false });
+        try {
+            const paySnap = await getDocs(query(collection(db, "payments"), orderBy("created_at", "desc")));
+            const paymentsData = paySnap.docs.map(d => {
+                const data = d.data();
+                return {
+                    id: d.id,
+                    ...data,
+                    received_at: data.created_at?.toDate?.()?.toISOString() || new Date().toISOString()
+                };
+            }) as any[];
 
-        if (payErr || !paymentsData) {
-            setPayments([]);
+            const participantIds = Array.from(new Set(paymentsData.map((p) => p.participant_id).filter(Boolean)));
+            const participantsMap = new Map();
+
+            if (participantIds.length > 0) {
+                const pSnap = await getDocs(query(collection(db, "participants"), where(documentId(), "in", participantIds)));
+                pSnap.docs.forEach(d => participantsMap.set(d.id, d.data()));
+            }
+
+            const merged = paymentsData.map(p => ({
+                ...p,
+                participants: participantsMap.get(p.participant_id) || null
+            }));
+
+            setPayments(merged);
+        } catch (err) {
+            console.error(err);
+        } finally {
             setLoading(false);
-            return;
         }
-
-        const participantIds = Array.from(new Set(paymentsData.map((p) => p.participant_id).filter(Boolean)));
-        const { data: participantsData } = await supabase
-            .from("participants")
-            .select("id, name, category, assigned_gate")
-            .in("id", participantIds);
-
-        const participantsMap = new Map((participantsData ?? []).map((p) => [p.id, p]));
-        const merged = paymentsData.map((p) => ({
-            ...p,
-            participants: participantsMap.get(p.participant_id) ?? null,
-        }));
-
-        setPayments(merged as any);
-        setLoading(false);
     };
 
-    useEffect(() => {
-        fetchPayments();
-    }, []);
+    useEffect(() => { fetchPayments(); }, []);
 
-    // Filter Data
     const filtered = useMemo(() => {
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
         return payments.filter((p) => {
             const d = new Date(p.received_at);
             if (filter === "today" && d < startOfDay) return false;
@@ -117,11 +114,9 @@ export default function CashPage() {
         });
     }, [payments, filter]);
 
-    // Hitung Statistik
     const stats = useMemo(() => {
         const cash = filtered.filter((p) => p.method === "cash");
         const sum = (arr: Payment[]) => arr.reduce((a, p) => a + p.amount, 0);
-        
         return {
             totalAll: sum(filtered),
             totalCash: sum(cash),
@@ -133,10 +128,8 @@ export default function CashPage() {
         };
     }, [filtered]);
 
-    // Hitung Rekap Admin
     const adminGroups = useMemo(() => {
         const groups = new Map<string, { name: string; held: number; settled: number; total: number; }>();
-
         filtered.filter((p) => p.method === "cash").forEach((p) => {
             const key = p.received_by ?? "Unknown";
             if (!groups.has(key)) groups.set(key, { name: key, held: 0, settled: 0, total: 0 });
@@ -145,7 +138,6 @@ export default function CashPage() {
             if (p.settle_status === "held") g.held += p.amount;
             else g.settled += p.amount;
         });
-
         return Array.from(groups.values()).sort((a, b) => b.held - a.held);
     }, [filtered]);
 
@@ -153,18 +145,32 @@ export default function CashPage() {
         if (!confirm(`Konfirmasi terima setoran ${formatRupiah(amount)} dari ${adminName}?`)) return;
         setSettlingBy(adminName);
 
-        await supabase
-            .from("payments")
-            .update({ settle_status: "settled", settled_at: new Date().toISOString(), settled_by: "Super Admin" })
-            .eq("method", "cash")
-            .eq("received_by", adminName)
-            .eq("settle_status", "held");
-
-        await fetchPayments();
-        setSettlingBy(null);
+        try {
+            const batch = writeBatch(db);
+            const q = query(
+                collection(db, "payments"), 
+                where("method", "==", "cash"), 
+                where("received_by", "==", adminName), 
+                where("settle_status", "==", "held")
+            );
+            const snap = await getDocs(q);
+            
+            snap.forEach((document) => {
+                batch.update(doc(db, "payments", document.id), {
+                    settle_status: "settled",
+                    settled_at: new Date(),
+                    settled_by: "Super Admin"
+                });
+            });
+            await batch.commit();
+            await fetchPayments();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSettlingBy(null);
+        }
     };
 
-    // Animasi Angka
     const shownTotal = useCountUp(stats.totalAll);
     const shownCash = useCountUp(stats.totalCash);
     const shownTransfer = useCountUp(stats.totalTransfer);
@@ -172,8 +178,6 @@ export default function CashPage() {
 
     return (
         <div className="space-y-6 pb-10 w-full max-w-3xl mx-auto selection:bg-emerald-500/30">
-            
-            {/* HEADER */}
             <header className="px-1 flex flex-col gap-1 mt-2">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 mb-1">
@@ -189,7 +193,6 @@ export default function CashPage() {
                 </h1>
             </header>
 
-            {/* FILTER */}
             <section>
                 <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {(["today", "week", "month", "all"] as FilterRange[]).map((f) => (
@@ -208,9 +211,7 @@ export default function CashPage() {
                 </div>
             </section>
 
-            {/* STATS GRID (Warna Gelap Elegan, Bukan Hitam Pekat) */}
             <section className="grid grid-cols-2 gap-3">
-                {/* Pendapatan */}
                 <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-emerald-500/30">
                     <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-emerald-500/10 blur-2xl"></div>
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
@@ -220,7 +221,6 @@ export default function CashPage() {
                     <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownTotal)}</p>
                 </div>
 
-                {/* Cash */}
                 <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-emerald-500/30">
                     <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-emerald-500/10 blur-2xl"></div>
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
@@ -230,7 +230,6 @@ export default function CashPage() {
                     <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownCash)}</p>
                 </div>
 
-                {/* Transfer */}
                 <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-blue-500/30">
                     <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-blue-500/10 blur-2xl"></div>
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
@@ -240,7 +239,6 @@ export default function CashPage() {
                     <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownTransfer)}</p>
                 </div>
 
-                {/* QRIS */}
                 <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-purple-500/30">
                     <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-purple-500/10 blur-2xl"></div>
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
@@ -251,7 +249,6 @@ export default function CashPage() {
                 </div>
             </section>
 
-            {/* REKAP SETORAN ADMIN (Kotak Peringatan yang Elegan) */}
             {stats.heldCash > 0 && (
                 <section className="rounded-3xl border border-amber-500/20 bg-amber-500/[0.05] p-5 flex items-start gap-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400">
@@ -315,7 +312,6 @@ export default function CashPage() {
                 </div>
             </section>
 
-            {/* RIWAYAT TRANSAKSI */}
             <section>
                 <div className="flex items-center justify-between px-1 mb-3">
                     <h2 className="text-base font-bold text-white">Riwayat Transaksi</h2>
@@ -380,7 +376,6 @@ export default function CashPage() {
                                         </div>
                                     </button>
 
-                                    {/* Detail Accordion */}
                                     <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
                                         <div className="overflow-hidden">
                                             <div className="grid grid-cols-2 gap-3 border-t border-white/[0.05] py-3 pl-5 pr-4">
@@ -411,7 +406,6 @@ export default function CashPage() {
                     </div>
                 )}
             </section>
-
         </div>
     );
 }

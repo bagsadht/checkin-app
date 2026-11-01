@@ -2,7 +2,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,40 +40,35 @@ export default function SettingsPage() {
 
     useEffect(() => {
         (async () => {
-            const { data, error: err } = await supabase
-                .from("payment_settings")
-                .select("*")
-                .eq("id", 1)
-                .maybeSingle();
-            if (err) setError(err.message);
-            else if (data) setForm(data);
-            setLoading(false);
+            try {
+                const snap = await getDoc(doc(db, "payment_settings", "default"));
+                if (snap.exists()) {
+                    setForm(snap.data() as Settings);
+                }
+            } catch (err: any) {
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
         })();
     }, []);
 
     const handleUploadQris = async (file: File) => {
         setUploading(true);
         setError(null);
-
-        const ext = file.name.split(".").pop() || "png";
-        const fileName = `qris-${Date.now()}.${ext}`;
-
-        const { error: upErr } = await supabase.storage
-            .from("payment-assets")
-            .upload(fileName, file, { upsert: true, contentType: file.type });
-
-        if (upErr) {
-            setError("Upload gagal: " + upErr.message);
+        try {
+            const fileName = `qris-${Date.now()}.${file.name.split(".").pop()}`;
+            const storageRef = ref(storage, `payment-assets/${fileName}`);
+            
+            await uploadBytes(storageRef, file);
+            const downloadUrl = await getDownloadURL(storageRef);
+            
+            setForm((prev) => ({ ...prev, qris_image_url: downloadUrl }));
+        } catch (err: any) {
+            setError("Upload gagal: " + err.message);
+        } finally {
             setUploading(false);
-            return;
         }
-
-        const { data: urlData } = supabase.storage
-            .from("payment-assets")
-            .getPublicUrl(fileName);
-
-        setForm((prev) => ({ ...prev, qris_image_url: urlData.publicUrl }));
-        setUploading(false);
     };
 
     const handleDeleteQris = async () => {
@@ -86,27 +83,23 @@ export default function SettingsPage() {
         setSuccess(false);
         setSaving(true);
 
-        const { error: err } = await supabase
-            .from("payment_settings")
-            .update({
+        try {
+            await setDoc(doc(db, "payment_settings", "default"), {
                 qris_image_url: form.qris_image_url,
                 bank_name: form.bank_name.trim(),
                 bank_account_no: form.bank_account_no.trim(),
                 bank_account_name: form.bank_account_name.trim(),
                 transfer_notes: form.transfer_notes.trim(),
                 updated_at: new Date().toISOString(),
-            })
-            .eq("id", 1);
+            }, { merge: true });
 
-        if (err) {
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 3000);
+        } catch (err: any) {
             setError(err.message);
+        } finally {
             setSaving(false);
-            return;
         }
-
-        setSuccess(true);
-        setSaving(false);
-        setTimeout(() => setSuccess(false), 3000);
     };
 
     if (loading) {
