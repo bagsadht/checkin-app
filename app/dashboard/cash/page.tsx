@@ -1,14 +1,13 @@
 // app/dashboard/cash/page.tsx
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { formatRupiah, formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     Wallet, Banknote, CreditCard, QrCode, CheckCircle2,
-    RefreshCw, Users, Download, Filter, Copy,
+    RefreshCw, Users, ChevronDown, Filter, UserCheck, AlertTriangle
 } from "lucide-react";
 
 type Payment = {
@@ -16,14 +15,10 @@ type Payment = {
     participant_id: string;
     amount: number;
     method: "cash" | "transfer" | "qris";
-    status: string;
     settle_status: "held" | "settled";
     received_by: string | null;
     receipt_no: string;
-    notes: string | null;
     received_at: string;
-    settled_at: string | null;
-    settled_by: string | null;
     participants: {
         name: string;
         category: string;
@@ -33,55 +28,74 @@ type Payment = {
 
 type FilterRange = "today" | "week" | "month" | "all";
 
+// Helper Animasi Angka
+function useCountUp(target: number, duration = 800) {
+    const [value, setValue] = useState(0);
+    const from = useRef(0);
+    useEffect(() => {
+        const start = performance.now();
+        const startVal = from.current;
+        let raf = 0;
+        const tick = (now: number) => {
+            const t = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - t, 3);
+            const v = Math.round(startVal + (target - startVal) * eased);
+            setValue(v);
+            from.current = v;
+            if (t < 1) raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [target, duration]);
+    return value;
+}
+
+const METHOD_BADGE: Record<string, string> = {
+    cash: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    transfer: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    qris: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+};
+const METHOD_BAR: Record<string, string> = {
+    cash: "bg-emerald-500",
+    transfer: "bg-blue-500",
+    qris: "bg-purple-500",
+};
+
 export default function CashPage() {
     const [payments, setPayments] = useState<Payment[]>([]);
     const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState<FilterRange>("all");
+    const [filter, setFilter] = useState<FilterRange>("today");
     const [settlingBy, setSettlingBy] = useState<string | null>(null);
-    const [copied, setCopied] = useState(false);
+    
+    // State untuk Accordion
+    const [openId, setOpenId] = useState<string | null>(null);
 
     const fetchPayments = async () => {
         setLoading(true);
-        try {
-            const { data: paymentsData, error: payErr } = await supabase
-                .from("payments")
-                .select("*")
-                .order("received_at", { ascending: false });
+        const { data: paymentsData, error: payErr } = await supabase
+            .from("payments")
+            .select("*")
+            .order("received_at", { ascending: false });
 
-            if (payErr) {
-                console.error("Fetch payments error:", payErr);
-                setLoading(false);
-                return;
-            }
-
-            if (!paymentsData || paymentsData.length === 0) {
-                setPayments([]);
-                setLoading(false);
-                return;
-            }
-
-            const participantIds = Array.from(
-                new Set(paymentsData.map((p) => p.participant_id).filter(Boolean))
-            );
-
-            const { data: participantsData } = await supabase
-                .from("participants")
-                .select("id, name, category, assigned_gate")
-                .in("id", participantIds);
-
-            const participantsMap = new Map(
-                (participantsData ?? []).map((p) => [p.id, p])
-            );
-
-            const merged = paymentsData.map((p) => ({
-                ...p,
-                participants: participantsMap.get(p.participant_id) ?? null,
-            }));
-
-            setPayments(merged as any);
-        } catch (err) {
-            console.error("Fetch error:", err);
+        if (payErr || !paymentsData) {
+            setPayments([]);
+            setLoading(false);
+            return;
         }
+
+        const participantIds = Array.from(new Set(paymentsData.map((p) => p.participant_id).filter(Boolean)));
+        const { data: participantsData } = await supabase
+            .from("participants")
+            .select("id, name, category, assigned_gate")
+            .in("id", participantIds);
+
+        const participantsMap = new Map((participantsData ?? []).map((p) => [p.id, p]));
+        const merged = paymentsData.map((p) => ({
+            ...p,
+            participants: participantsMap.get(p.participant_id) ?? null,
+        }));
+
+        setPayments(merged as any);
         setLoading(false);
     };
 
@@ -89,61 +103,43 @@ export default function CashPage() {
         fetchPayments();
     }, []);
 
+    // Filter Data
     const filtered = useMemo(() => {
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
         return payments.filter((p) => {
             const d = new Date(p.received_at);
-            if (filter === "today") return d >= startOfDay;
-            if (filter === "week") {
-                const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                return d >= weekAgo;
-            }
-            if (filter === "month") {
-                const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                return d >= monthAgo;
-            }
+            if (filter === "today" && d < startOfDay) return false;
+            if (filter === "week" && d < new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)) return false;
+            if (filter === "month" && d < new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)) return false;
             return true;
         });
     }, [payments, filter]);
 
+    // Hitung Statistik
     const stats = useMemo(() => {
         const cash = filtered.filter((p) => p.method === "cash");
-        const transfer = filtered.filter((p) => p.method === "transfer");
-        const qris = filtered.filter((p) => p.method === "qris");
-
         const sum = (arr: Payment[]) => arr.reduce((a, p) => a + p.amount, 0);
-        const heldCash = cash.filter((p) => p.settle_status === "held");
-        const settledCash = cash.filter((p) => p.settle_status === "settled");
-
+        
         return {
-            totalCash: sum(cash),
-            totalTransfer: sum(transfer),
-            totalQris: sum(qris),
             totalAll: sum(filtered),
-            heldCash: sum(heldCash),
-            settledCash: sum(settledCash),
-            countCash: cash.length,
-            countTransfer: transfer.length,
-            countQris: qris.length,
+            totalCash: sum(cash),
+            totalTransfer: sum(filtered.filter((p) => p.method === "transfer")),
+            totalQris: sum(filtered.filter((p) => p.method === "qris")),
+            heldCash: sum(cash.filter((p) => p.settle_status === "held")),
             countAll: filtered.length,
+            countCash: cash.length,
         };
     }, [filtered]);
 
+    // Hitung Rekap Admin
     const adminGroups = useMemo(() => {
-        const groups = new Map<string, {
-            name: string;
-            held: number;
-            settled: number;
-            total: number;
-        }>();
+        const groups = new Map<string, { name: string; held: number; settled: number; total: number; }>();
 
         filtered.filter((p) => p.method === "cash").forEach((p) => {
             const key = p.received_by ?? "Unknown";
-            if (!groups.has(key)) {
-                groups.set(key, { name: key, held: 0, settled: 0, total: 0 });
-            }
+            if (!groups.has(key)) groups.set(key, { name: key, held: 0, settled: 0, total: 0 });
             const g = groups.get(key)!;
             g.total += p.amount;
             if (p.settle_status === "held") g.held += p.amount;
@@ -155,226 +151,160 @@ export default function CashPage() {
 
     const handleSettle = async (adminName: string, amount: number) => {
         if (!confirm(`Konfirmasi terima setoran ${formatRupiah(amount)} dari ${adminName}?`)) return;
-
         setSettlingBy(adminName);
-        const { error } = await supabase
+
+        await supabase
             .from("payments")
-            .update({
-                settle_status: "settled",
-                settled_at: new Date().toISOString(),
-                settled_by: "Super Admin",
-            })
+            .update({ settle_status: "settled", settled_at: new Date().toISOString(), settled_by: "Super Admin" })
             .eq("method", "cash")
             .eq("received_by", adminName)
             .eq("settle_status", "held");
 
-        if (error) {
-            alert("Gagal: " + error.message);
-        } else {
-            await fetchPayments();
-        }
+        await fetchPayments();
         setSettlingBy(null);
     };
 
-    // Build CSV dengan SEMICOLON (untuk Excel Indonesia)
-    const buildCSV = (): string => {
-        const headers = [
-            "Kwitansi", "Tanggal", "Nama", "Kategori", "Gate",
-            "Metode", "Status", "Jumlah", "Diterima Oleh", "Disetor Oleh"
-        ];
-        const rows = filtered.map((p) => [
-            p.receipt_no,
-            formatDateTime(p.received_at),
-            p.participants?.name ?? "-",
-            p.participants?.category ?? "-",
-            p.participants?.assigned_gate ?? "-",
-            p.method.toUpperCase(),
-            p.settle_status === "held" ? "Belum Setor" : "Sudah Setor",
-            p.amount.toString(),
-            p.received_by ?? "-",
-            p.settled_by ?? "-",
-        ]);
-        // PENTING: pakai ; bukan ,
-        return [headers, ...rows]
-            .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";"))
-            .join("\r\n");
-    };
-
-    const handleExportCSV = () => {
-        if (filtered.length === 0) {
-            alert("Belum ada transaksi untuk diexport");
-            return;
-        }
-        try {
-            const csvContent = buildCSV();
-            const BOM = "\uFEFF";
-            const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
-
-            const link = document.createElement("a");
-            const url = URL.createObjectURL(blob);
-            const filename = `laporan-kas-${new Date().toISOString().slice(0, 10)}.csv`;
-
-            link.setAttribute("href", url);
-            link.setAttribute("download", filename);
-            link.style.visibility = "hidden";
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-
-            console.log("CSV downloaded:", filename, "Rows:", filtered.length);
-        } catch (err) {
-            console.error("Export error:", err);
-            alert("Gagal export: " + (err as Error).message);
-        }
-    };
-
-    const handleCopyCSV = async () => {
-        if (filtered.length === 0) {
-            alert("Belum ada transaksi untuk dicopy");
-            return;
-        }
-        try {
-            const csvContent = buildCSV();
-            await navigator.clipboard.writeText(csvContent);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error("Copy error:", err);
-            alert("Gagal copy: " + (err as Error).message);
-        }
-    };
+    // Animasi Angka
+    const shownTotal = useCountUp(stats.totalAll);
+    const shownCash = useCountUp(stats.totalCash);
+    const shownTransfer = useCountUp(stats.totalTransfer);
+    const shownQris = useCountUp(stats.totalQris);
 
     return (
-        <div className="p-4 text-[#fafafa] sm:p-6 lg:p-8">
-            <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Laporan Kas</h1>
-                    <p className="mt-1 text-sm text-[#737373]">
-                        Rekap pembayaran & setoran uang cash dari admin
-                    </p>
-                </div>
-                <div className="flex gap-2">
-                    <Button
-                        onClick={handleCopyCSV}
-                        disabled={filtered.length === 0}
-                        variant="outline"
-                        className="border-[#3a3a3a] text-[#fafafa] disabled:opacity-50"
-                    >
-                        <Copy size={16} className="mr-2" />
-                        {copied ? "Tersalin!" : "Copy CSV"}
-                    </Button>
-                    <Button
-                        onClick={handleExportCSV}
-                        disabled={filtered.length === 0}
-                        className="bg-[#f59e0b] text-[#0a0a0a] hover:bg-[#fbbf24] disabled:opacity-50"
-                    >
-                        <Download size={16} className="mr-2" />
-                        Export CSV
+        <div className="space-y-6 pb-10 w-full max-w-3xl mx-auto selection:bg-emerald-500/30">
+            
+            {/* HEADER */}
+            <header className="px-1 flex flex-col gap-1 mt-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 mb-1">
+                        <Wallet size={16} className="text-emerald-400" />
+                        <p className="text-xs font-semibold text-emerald-400 uppercase tracking-widest">Keuangan Event</p>
+                    </div>
+                    <Button onClick={fetchPayments} variant="outline" size="sm" className="h-8 rounded-full border-white/10 bg-white/5 text-xs text-zinc-300 hover:bg-white/10 hover:text-white">
+                        <RefreshCw size={12} className="mr-1.5" /> Refresh
                     </Button>
                 </div>
-            </div>
+                <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl leading-tight">
+                    Laporan Kas
+                </h1>
+            </header>
 
-            <div className="mb-6 flex items-center gap-2">
-                <Filter size={16} className="text-[#737373]" />
-                {(["today", "week", "month", "all"] as FilterRange[]).map((f) => (
-                    <button
-                        key={f}
-                        onClick={() => setFilter(f)}
-                        className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
-                            filter === f
-                                ? "bg-[#f59e0b] text-[#0a0a0a]"
-                                : "border border-[#262626] bg-[#141414] text-[#a3a3a3] hover:border-[#3a3a3a]"
-                        }`}
-                    >
-                        {f === "today" && "Hari Ini"}
-                        {f === "week" && "7 Hari"}
-                        {f === "month" && "30 Hari"}
-                        {f === "all" && "Semua"}
-                    </button>
-                ))}
-                <Button
-                    onClick={fetchPayments}
-                    variant="outline"
-                    size="sm"
-                    className="ml-auto border-[#262626] text-[#a3a3a3]"
-                >
-                    <RefreshCw size={14} className="mr-2" />
-                    Refresh
-                </Button>
-            </div>
+            {/* FILTER */}
+            <section>
+                <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {(["today", "week", "month", "all"] as FilterRange[]).map((f) => (
+                        <button
+                            key={f}
+                            onClick={() => setFilter(f)}
+                            className={`flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition-all duration-200 active:scale-95 ${
+                                filter === f
+                                    ? "border-emerald-500/40 bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
+                                    : "border-white/[0.06] bg-[#121214] text-zinc-400 hover:border-white/15 hover:text-white"
+                            }`}
+                        >
+                            {f === "today" ? "Hari Ini" : f === "week" ? "7 Hari" : f === "month" ? "30 Hari" : "Semua"}
+                        </button>
+                    ))}
+                </div>
+            </section>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <StatCard icon={Wallet} label="Total Pendapatan" value={formatRupiah(stats.totalAll)} sub={`${stats.countAll} transaksi`} color="amber" />
-                <StatCard icon={Banknote} label="Cash" value={formatRupiah(stats.totalCash)} sub={`${stats.countCash} transaksi`} color="green" />
-                <StatCard icon={CreditCard} label="Transfer" value={formatRupiah(stats.totalTransfer)} sub={`${stats.countTransfer} transaksi`} color="blue" />
-                <StatCard icon={QrCode} label="QRIS" value={formatRupiah(stats.totalQris)} sub={`${stats.countQris} transaksi`} color="purple" />
-            </div>
+            {/* STATS GRID (Warna Gelap Elegan, Bukan Hitam Pekat) */}
+            <section className="grid grid-cols-2 gap-3">
+                {/* Pendapatan */}
+                <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-emerald-500/30">
+                    <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-emerald-500/10 blur-2xl"></div>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                        <Wallet size={18} />
+                    </div>
+                    <p className="mt-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Pendapatan</p>
+                    <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownTotal)}</p>
+                </div>
 
+                {/* Cash */}
+                <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-emerald-500/30">
+                    <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-emerald-500/10 blur-2xl"></div>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                        <Banknote size={18} />
+                    </div>
+                    <p className="mt-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Cash</p>
+                    <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownCash)}</p>
+                </div>
+
+                {/* Transfer */}
+                <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-blue-500/30">
+                    <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-blue-500/10 blur-2xl"></div>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                        <CreditCard size={18} />
+                    </div>
+                    <p className="mt-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Transfer</p>
+                    <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownTransfer)}</p>
+                </div>
+
+                {/* QRIS */}
+                <div className="group relative overflow-hidden rounded-3xl border border-white/[0.06] bg-[#121214] p-5 transition-all hover:border-purple-500/30">
+                    <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-purple-500/10 blur-2xl"></div>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
+                        <QrCode size={18} />
+                    </div>
+                    <p className="mt-4 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">QRIS</p>
+                    <p className="text-xl font-bold text-white mt-1">{formatRupiah(shownQris)}</p>
+                </div>
+            </section>
+
+            {/* REKAP SETORAN ADMIN (Kotak Peringatan yang Elegan) */}
             {stats.heldCash > 0 && (
-                <Card className="mt-6 border-[#f59e0b]/30 bg-[#1a1508]">
-                    <CardContent className="flex items-center gap-4 p-5">
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#f59e0b]/20">
-                            <Wallet size={22} className="text-[#f59e0b]" />
-                        </div>
-                        <div className="flex-1">
-                            <p className="text-[14px] font-bold text-[#f59e0b]">Uang Cash Belum Disetor</p>
-                            <p className="mt-0.5 text-[12.5px] text-[#a3a3a3]">
-                                Total {formatRupiah(stats.heldCash)} masih dipegang admin
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
+                <section className="rounded-3xl border border-amber-500/20 bg-amber-500/[0.05] p-5 flex items-start gap-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-400">
+                        <AlertTriangle size={20} />
+                    </div>
+                    <div className="flex-1">
+                        <p className="text-[14px] font-bold text-amber-400">Cash Belum Disetor</p>
+                        <p className="text-[12px] text-zinc-400 mt-1">Total <span className="font-bold text-white">{formatRupiah(stats.heldCash)}</span> masih dipegang oleh admin gate.</p>
+                    </div>
+                </section>
             )}
 
-            <Card className="mt-6 border-[#1c1c1c] bg-[#0f0f0f]">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-[15px]">
-                        <Users size={18} className="text-[#60a5fa]" />
-                        Rekap Cash per Admin
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
+            <section>
+                <div className="flex items-center justify-between px-1 mb-3">
+                    <h2 className="text-base font-bold text-white">Rekap Cash Admin</h2>
+                </div>
+
+                <div className="rounded-2xl border border-white/[0.05] bg-[#121214]/50 overflow-hidden shadow-sm">
                     {loading ? (
-                        <p className="py-8 text-center text-sm text-[#737373]">Memuat...</p>
+                        <div className="p-6 text-center text-sm text-zinc-500">Memuat data...</div>
                     ) : adminGroups.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-[#737373]">Belum ada transaksi cash.</p>
+                        <div className="p-6 text-center text-sm text-zinc-500">Belum ada transaksi cash.</div>
                     ) : (
-                        <div className="space-y-3">
+                        <div className="divide-y divide-white/[0.04]">
                             {adminGroups.map((g) => (
-                                <div key={g.name} className="rounded-xl border border-[#1c1c1c] bg-[#141414] p-4">
-                                    <div className="flex items-center justify-between gap-4">
-                                        <div className="min-w-0 flex-1">
-                                            <p className="text-[14px] font-semibold">{g.name}</p>
-                                            <div className="mt-1 flex flex-wrap items-center gap-3 text-[11.5px]">
-                                                <span className="text-[#737373]">
-                                                    Total: <span className="text-[#fafafa]">{formatRupiah(g.total)}</span>
-                                                </span>
-                                                {g.settled > 0 && (
-                                                    <span className="text-[#737373]">
-                                                        Sudah Setor: <span className="text-[#4ade80]">{formatRupiah(g.settled)}</span>
-                                                    </span>
-                                                )}
-                                                {g.held > 0 && (
-                                                    <span className="text-[#737373]">
-                                                        Belum Setor: <span className="text-[#f59e0b]">{formatRupiah(g.held)}</span>
-                                                    </span>
-                                                )}
-                                            </div>
+                                <div key={g.name} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 hover:bg-white/[0.02] transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-zinc-300 border border-white/10">
+                                            <Users size={18} />
+                                        </div>
+                                        <div>
+                                            <p className="text-[14px] font-bold text-white">{g.name}</p>
+                                            <p className="text-[11px] text-zinc-500 mt-0.5">Total: {formatRupiah(g.total)}</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
+                                        <div className="text-left sm:text-right">
+                                            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Belum Setor</p>
+                                            <p className="text-[15px] font-extrabold text-amber-400">{formatRupiah(g.held)}</p>
                                         </div>
                                         {g.held > 0 ? (
                                             <Button
                                                 onClick={() => handleSettle(g.name, g.held)}
                                                 disabled={settlingBy === g.name}
-                                                className="shrink-0 bg-[#22c55e] text-white hover:bg-[#16a34a]"
+                                                className="bg-emerald-500 text-white hover:bg-emerald-400 h-9 rounded-xl text-xs px-4"
                                             >
-                                                <CheckCircle2 size={14} className="mr-2" />
-                                                {settlingBy === g.name ? "Memproses..." : "Terima Setoran"}
+                                                <UserCheck size={14} className="mr-1.5" />
+                                                {settlingBy === g.name ? "Proses..." : "Terima"}
                                             </Button>
                                         ) : (
-                                            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#22c55e]/15 px-3 py-1.5 text-[11.5px] font-semibold text-[#4ade80]">
-                                                <CheckCircle2 size={12} />
-                                                Lunas
+                                            <span className="flex items-center gap-1.5 rounded-xl bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-400 border border-emerald-500/20">
+                                                <CheckCircle2 size={14} /> Lunas
                                             </span>
                                         )}
                                     </div>
@@ -382,94 +312,106 @@ export default function CashPage() {
                             ))}
                         </div>
                     )}
-                </CardContent>
-            </Card>
-
-            <Card className="mt-6 border-[#1c1c1c] bg-[#0f0f0f]">
-                <CardHeader>
-                    <CardTitle className="text-[15px]">Detail Transaksi ({filtered.length})</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {loading ? (
-                        <p className="py-8 text-center text-sm text-[#737373]">Memuat...</p>
-                    ) : filtered.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-[#737373]">Belum ada transaksi.</p>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-[12.5px]">
-                                <thead>
-                                    <tr className="border-b border-[#1c1c1c] text-left text-[10.5px] uppercase tracking-wider text-[#737373]">
-                                        <th className="px-2 py-2">Kwitansi</th>
-                                        <th className="px-2 py-2">Nama</th>
-                                        <th className="px-2 py-2">Metode</th>
-                                        <th className="px-2 py-2">Jumlah</th>
-                                        <th className="px-2 py-2">Diterima</th>
-                                        <th className="px-2 py-2">Status</th>
-                                        <th className="px-2 py-2">Waktu</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filtered.slice(0, 50).map((p) => (
-                                        <tr key={p.id} className="border-b border-[#1c1c1c]/50">
-                                            <td className="px-2 py-2 font-mono text-[11px] text-[#f59e0b]">{p.receipt_no}</td>
-                                            <td className="px-2 py-2 text-[#fafafa]">{p.participants?.name ?? "-"}</td>
-                                            <td className="px-2 py-2">
-                                                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                                                    p.method === "cash" ? "bg-[#22c55e]/15 text-[#4ade80]" :
-                                                    p.method === "transfer" ? "bg-[#60a5fa]/15 text-[#60a5fa]" :
-                                                    "bg-[#a78bfa]/15 text-[#a78bfa]"
-                                                }`}>
-                                                    {p.method}
-                                                </span>
-                                            </td>
-                                            <td className="px-2 py-2 font-semibold text-[#fafafa]">{formatRupiah(p.amount)}</td>
-                                            <td className="px-2 py-2 text-[#a3a3a3]">{p.received_by ?? "-"}</td>
-                                            <td className="px-2 py-2">
-                                                {p.method === "cash" ? (
-                                                    p.settle_status === "settled" ? (
-                                                        <span className="text-[#4ade80]">Sudah Setor</span>
-                                                    ) : (
-                                                        <span className="text-[#f59e0b]">Belum Setor</span>
-                                                    )
-                                                ) : (
-                                                    <span className="text-[#737373]">Auto</span>
-                                                )}
-                                            </td>
-                                            <td className="px-2 py-2 text-[#737373]">{formatDateTime(p.received_at)}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            {filtered.length > 50 && (
-                                <p className="mt-3 text-center text-[11px] text-[#737373]">
-                                    Menampilkan 50 dari {filtered.length} transaksi - gunakan Export CSV untuk semua data
-                                </p>
-                            )}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-        </div>
-    );
-}
-
-function StatCard({ icon: Icon, label, value, sub, color }: any) {
-    const colors: any = {
-        amber: "bg-[#f59e0b]/15 text-[#f59e0b]",
-        green: "bg-[#22c55e]/15 text-[#4ade80]",
-        blue: "bg-[#3b82f6]/15 text-[#60a5fa]",
-        purple: "bg-[#a78bfa]/15 text-[#a78bfa]",
-    };
-    return (
-        <Card className="border-[#1c1c1c] bg-[#0f0f0f]">
-            <CardContent className="p-5">
-                <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl ${colors[color]}`}>
-                    <Icon size={18} />
                 </div>
-                <p className="text-[11.5px] font-medium text-[#737373]">{label}</p>
-                <p className="mt-1 text-[20px] font-bold tracking-tight">{value}</p>
-                <p className="mt-0.5 text-[11px] text-[#525252]">{sub}</p>
-            </CardContent>
-        </Card>
+            </section>
+
+            {/* RIWAYAT TRANSAKSI */}
+            <section>
+                <div className="flex items-center justify-between px-1 mb-3">
+                    <h2 className="text-base font-bold text-white">Riwayat Transaksi</h2>
+                    <span className="text-[11px] font-semibold text-zinc-500 bg-white/5 px-2.5 py-1 rounded-full">
+                        {filtered.length} Data
+                    </span>
+                </div>
+
+                {loading ? (
+                    <div className="space-y-2">
+                        {[0, 1, 2].map((i) => (
+                            <div key={i} className="h-[72px] animate-pulse rounded-2xl border border-white/[0.04] bg-[#121214]/60" />
+                        ))}
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/10 bg-[#121214]/40 p-8 text-center text-sm font-medium text-zinc-500">
+                        Belum ada transaksi untuk periode ini.
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {filtered.slice(0, 50).map((p) => {
+                            const key = p.method.toLowerCase();
+                            const isOpen = openId === p.id;
+
+                            return (
+                                <div
+                                    key={p.id}
+                                    className={`relative overflow-hidden rounded-2xl border bg-[#121214]/70 transition-all duration-300 ${
+                                        isOpen ? "border-white/15 bg-[#161618]" : "border-white/[0.05] hover:border-white/10 hover:bg-white/[0.03]"
+                                    }`}
+                                >
+                                    <span className={`absolute left-0 top-0 h-full w-1 ${METHOD_BAR[key] ?? "bg-zinc-600"}`} />
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setOpenId(isOpen ? null : p.id)}
+                                        className="group flex w-full items-center justify-between gap-3 py-3 pl-5 pr-4 text-left transition-transform active:scale-[0.99]"
+                                    >
+                                        <div className="flex min-w-0 items-center gap-3">
+                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 text-zinc-300 border border-white/5">
+                                                <Wallet size={18} />
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <p className="truncate text-sm font-bold text-white">
+                                                        {p.participants?.name ?? "Peserta"}
+                                                    </p>
+                                                    <span className={`rounded-md border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${METHOD_BADGE[key]}`}>
+                                                        {p.method}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-0.5 text-[11px] font-medium text-zinc-500 truncate">
+                                                    {formatDateTime(p.received_at)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex shrink-0 items-center gap-3">
+                                            <p className="text-sm font-extrabold text-white">
+                                                {formatRupiah(p.amount)}
+                                            </p>
+                                            <ChevronDown size={16} className={`text-zinc-500 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} />
+                                        </div>
+                                    </button>
+
+                                    {/* Detail Accordion */}
+                                    <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                                        <div className="overflow-hidden">
+                                            <div className="grid grid-cols-2 gap-3 border-t border-white/[0.05] py-3 pl-5 pr-4">
+                                                <div>
+                                                    <p className="text-[10px] uppercase text-zinc-500 mb-1">No. Kwitansi</p>
+                                                    <p className="font-mono text-xs text-emerald-400">{p.receipt_no}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase text-zinc-500 mb-1">Petugas</p>
+                                                    <p className="text-xs text-white">{p.received_by ?? "-"}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase text-zinc-500 mb-1">Status Setor</p>
+                                                    <p className={`text-xs font-bold ${p.settle_status === "settled" ? "text-emerald-400" : "text-amber-400"}`}>
+                                                        {p.settle_status === "settled" ? "Lunas / Disetor" : "Dipegang Admin"}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] uppercase text-zinc-500 mb-1">Gate</p>
+                                                    <p className="text-xs text-white">{p.participants?.assigned_gate ?? "-"}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </section>
+
+        </div>
     );
 }
